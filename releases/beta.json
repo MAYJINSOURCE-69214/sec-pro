@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "version": "0.2.0-beta.2",
+  "url": "https://github.com/fangzhengfelix9461/sec-pro/releases/download/v0.2.0-beta.2/SEC-Pro-Beta-0.2.0-beta.2.zip",
+  "sha256": "cd766b3066b02ee0c37c61cf449b29668609b1256e88cea435218f8f1b3316ed",
+  "notes": "SEC Pro Beta 0.2：团队经验、可配置模型工人和版本更新。公开ZIP校验与隔离SEC安装通过；公司API、员工完整GSD安装及GUI待目标环境验收。"
+}
