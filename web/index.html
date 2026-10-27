@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>SEC Pro · 经验工作台</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+  <script src="/settings.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="#overview"><span class="brand-mark">S<span>·</span></span><span>SEC Pro<small>经验，让协作持续进化</small></span></a>
+      <div class="workspace-label">个人工作空间 <span>BETA</span></div>
+      <nav id="navigation">
+        <a href="#overview" data-view="overview"><span class="nav-icon">◫</span>总览</a>
+        <a href="#library" data-view="library"><span class="nav-icon">▤</span>经验与技能<span class="nav-count" id="nav-count">—</span></a>
+        <a href="#personal" data-view="personal"><span class="nav-icon">◇</span>我的经验</a>
+        <a href="#models" data-view="models"><span class="nav-icon">⌘</span>分工设置</a>
+        <a href="#updates" data-view="updates"><span class="nav-icon">↻</span>版本更新</a>
+      </nav>
+      <div class="sidebar-bottom"><span class="status-dot"></span>本地运行 · 数据留在本机<p>把有效的方法，变成下一次的起点。</p><span id="sidebar-version">SEC PRO / BETA</span></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><span>工作空间 <span class="breadcrumb">/</span> <strong id="page-label">总览</strong></span><div class="topbar-right"><span class="preview-badge" id="runtime-badge">正在读取运行模式</span><span class="connection"><span class="status-dot muted"></span><span id="github-status">GitHub 状态待读取</span></span></div></header>
+      <main id="main" tabindex="-1">
+        <div class="preview-notice"><span class="notice-icon">i</span><p id="runtime-notice">正在读取本地服务的运行模式与配置。</p></div>
+        <div id="global-error" class="error-banner" role="alert" hidden><span id="global-error-text"></span><button id="retry" class="text-button">重新加载</button></div>
+        <section class="page-heading"><div><p class="eyebrow" id="page-eyebrow">YOUR KNOWLEDGE, CONNECTED</p><h1 id="page-title">让每一次经验，都成为积累。</h1><p id="page-description">汇集个人方法、团队经验与可复用技能，随时找到下一步的起点。</p></div><button class="button primary" id="add-experience"><span aria-hidden="true">＋</span> 记录经验</button></section>
+        <section class="action-grid" aria-label="主要操作">
+          <button class="action-card" id="sync-official"><span class="action-symbol blue" aria-hidden="true">↓</span><span><strong>同步下载经验</strong><small id="sync-description">读取维护者发布的经验与技能</small></span><span class="action-arrow" aria-hidden="true">↗</span></button>
+          <button class="action-card" id="sync-team"><span class="action-symbol violet" aria-hidden="true">⇄</span><span><strong>同步团队经验</strong><small>把共同验证的方法带入工作</small></span><span class="action-arrow" aria-hidden="true">↗</span></button>
+          <button class="action-card" id="open-share"><span class="action-symbol green" aria-hidden="true">↑</span><span><strong>上传自己的经验</strong><small>检查内容，生成待上传提案</small></span><span class="action-arrow" aria-hidden="true">↗</span></button>
+        </section>
+        <div id="loading" class="loading-state" role="status"><span class="spinner"></span>正在读取本地经验库…</div>
+        <div id="content" hidden>
+          <section id="overview-panel">
+            <div class="stats-grid"><div class="stat"><span>经验库总量</span><strong id="stat-total">0</strong><small>持续沉淀的工作方法</small></div><div class="stat"><span>可复用技能</span><strong id="stat-skills">0</strong><small>按需查看，确认后启用</small></div><div class="stat"><span>我的经验</span><strong id="stat-personal">0</strong><small>私有保存，自主选择分享</small></div><div class="stat"><span>团队经验</span><strong id="stat-team">0</strong><small>来自团队目录的共同积累</small></div></div>
+          </section>
+          <section id="library-panel" class="panel">
+            <div class="section-heading"><div><h2 id="list-title">探索经验库</h2><p id="list-description">从已有积累中，找到适合当前任务的方法。</p></div><span id="result-count" class="result-count"></span></div>
+            <div class="filter-toolbar"><div class="segmented" aria-label="内容类型"><button data-kind="all" aria-pressed="true">全部</button><button data-kind="experience" aria-pressed="false">经验</button><button data-kind="skill" aria-pressed="false">技能</button></div><div class="filter-inputs"><label class="sr-only" for="source-filter">来源</label><select id="source-filter"><option value="all">全部来源</option><option value="bundled">随包经验</option><option value="official">维护者发布</option><option value="team">团队经验</option><option value="personal">我的经验</option></select><label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索标题、内容或标签" aria-label="搜索经验与技能"></label></div></div>
+            <div id="experience-list" class="experience-list"></div>
+            <div id="empty-state" class="empty-state" hidden><span aria-hidden="true">◇</span><h3>还没有找到相关内容</h3><p>试试其他关键词，或记录一条自己的经验。</p><button class="button secondary" id="clear-filters">清除筛选</button></div>
+          </section>
+          <section id="activity-panel" class="panel activity-panel"><div class="section-heading"><div><h2>最近动态</h2><p>查看本机的同步、记录与提案操作。</p></div><span class="local-label">LOCAL ACTIVITY</span></div><div id="activity-list"></div></section>
+          <section id="models-panel" hidden><div class="panel model-intro"><div class="section-heading"><div><h2>合适的工作，交给合适的模型</h2><p>主模型保持用户选择，文档阅读、撰写和编码由明确的工人配置承担。</p></div><span class="tag">当前配置</span></div><div id="model-grid" class="model-grid"></div><div class="model-footnote"><strong id="parallel-info"></strong><p>这些是可配置的默认分工，不代表账号已具备模型访问权限，也不代表已实测费用节省。此页面只展示配置；调整请使用本地配置文件。</p></div></div><div class="panel release-panel"><span class="eyebrow">BUILT TO GROW</span><h2>为后续协作留好空间</h2><p id="release-description">维护者发布、团队目录和个人经验采用独立来源标记。远程上传请使用 CLI，并单独确认公开分享。</p></div></section>
+        </div>
+        <section id="updates-panel" class="panel release-panel" hidden>
+          <p class="eyebrow">TEAM RELEASES</p><h2>你发布新版，团队跟上新版。</h2>
+          <p id="update-version"></p><p>员工端在开始任务时检查一次；启用自动更新后，只在没有工人运行时安装。自己的经验、公司 API 设置与自定义角色保留。更新后重启工作台，在 Codex 新会话使用新版。</p>
+          <form id="update-form" class="settings-form">
+            <label>维护者 GitHub 仓库<input id="update-repository" placeholder="company/sec-pro" required></label>
+            <label>更新频道<select id="update-channel"><option value="beta">Beta 测试版</option><option value="stable">Stable 稳定版</option></select></label>
+            <label class="checkbox-label"><input type="checkbox" id="update-trusted">我信任此仓库发布的程序更新</label>
+            <label class="checkbox-label"><input type="checkbox" id="update-auto">开始任务时自动检查，并在空闲时自动安装</label>
+            <button class="button secondary" type="submit">保存更新设置</button>
+          </form>
+          <div class="settings-actions"><button id="check-update" class="button secondary">检查新版本</button><button id="apply-update" class="button primary">安装已检查的新版</button><button id="rollback-update" class="button secondary">回退上一版</button></div>
+          <label class="checkbox-label"><input type="checkbox" id="confirm-update">我已检查更新来源，确认安装或回退（预览模式不会修改真实安装）</label>
+          <p id="update-message" class="scope-note">尚未检查远程版本。</p>
+        </section>
+        <footer class="footer"><span>SEC Pro <span id="footer-version">Beta</span></span><span>经验可追溯 · 分享由你决定</span></footer>
+      </main>
+    </div>
+  </div>
+  <dialog id="detail-dialog" class="dialog wide-dialog" aria-labelledby="detail-title"><div class="dialog-header"><span class="eyebrow">KNOWLEDGE DETAIL</span><button class="icon-button" data-close aria-label="关闭详情">×</button></div><div class="dialog-content"><div id="detail-meta" class="meta-row"></div><h2 id="detail-title"></h2><p id="detail-summary" class="detail-summary"></p><div id="detail-tags" class="tags"></div><pre id="detail-body" class="body-content"></pre><p id="detail-scope" class="scope-note" hidden>启用后会将此技能写入隔离的预览 Codex 技能目录，仅作用于本地预览；技能正文是 Markdown 指令。请先阅读并确认内容。</p><div id="detail-error" class="inline-error" role="alert" hidden></div></div><div class="dialog-footer"><button class="button secondary" data-close>关闭</button><button class="button primary" id="detail-action" hidden></button></div></dialog>
+  <dialog id="create-dialog" class="dialog" aria-labelledby="create-title"><form id="create-form"><div class="dialog-header"><span class="eyebrow">CAPTURE WHAT WORKS</span><button type="button" class="icon-button" data-close aria-label="关闭记录窗口">×</button></div><div class="dialog-content"><h2 id="create-title">记录一条自己的经验</h2><p class="form-intro">先私有保存为候选条目，之后再决定是否分享。</p><label for="experience-title">标题 <span class="required">*</span></label><input id="experience-title" name="title" required maxlength="120" placeholder="例如：长文档阅读前，先建立问题清单"><label for="experience-kind">内容类型</label><select id="experience-kind" name="kind"><option value="experience">经验 · 方法与实践</option><option value="skill">技能 · Markdown 操作指令</option></select><label for="experience-body">正文 <span class="required">*</span></label><textarea id="experience-body" name="body" required maxlength="24000" rows="7" placeholder="描述适用场景、具体方法和需要注意的边界…"></textarea><label for="experience-tags">标签</label><input id="experience-tags" name="tags" placeholder="用逗号分隔，例如：文档阅读，工作流"><p class="field-hint">请勿填写密钥、账号密码或他人的隐私信息。</p><div id="create-error" class="inline-error" role="alert" hidden></div></div><div class="dialog-footer"><button type="button" class="button secondary" data-close>取消</button><button type="submit" class="button primary" id="save-experience">保存到我的经验</button></div></form></dialog>
+  <dialog id="share-dialog" class="dialog wide-dialog" aria-labelledby="share-title"><div class="dialog-header"><span class="eyebrow">REVIEW BEFORE SHARING</span><button class="icon-button" data-close aria-label="关闭分享窗口">×</button></div><div class="dialog-content"><h2 id="share-title">上传自己的经验</h2><p class="form-intro">检查个人条目并生成本地待上传提案。此页面不会发送到 GitHub；真实上传仅通过 CLI 单独确认。</p><label for="share-select">选择个人经验或技能</label><select id="share-select"></select><button class="button secondary review-button" id="review-share">检查并预览内容</button><div id="share-empty" class="scope-note" hidden>还没有个人条目。请先使用「记录经验」保存一条内容。</div><div id="share-preview" hidden><div class="preview-heading"><h3 id="share-preview-title"></h3><span class="tag">分享预览</span></div><p id="share-preview-summary" class="detail-summary"></p><div id="share-preview-tags" class="tags"></div><pre id="share-preview-body" class="body-content compact"></pre><div id="share-warnings" class="warning-box"></div><p class="field-hint">自动检查无法保证隐私安全，请逐字复核内容。提案将保存在本机待上传目录，未发送到 GitHub。</p><label class="checkbox-label"><input type="checkbox" id="share-confirm">我已复核全文，确认可生成本地待上传提案</label></div><div id="share-error" class="inline-error" role="alert" hidden></div><div id="share-success" class="success-box" role="status" hidden></div></div><div class="dialog-footer"><button class="button secondary" data-close>关闭</button><button class="button primary" id="prepare-share" disabled>生成待上传提案</button></div></dialog>
+  <dialog id="worker-dialog" class="dialog wide-dialog" aria-labelledby="worker-title"><div class="dialog-header"><h2 id="worker-title">自定义供应商、模型与角色</h2><button class="icon-button" data-close aria-label="关闭分工配置">×</button></div><div class="dialog-content">
+    <p>这里可同时配置 GPT、Kimi、千问或公司兼容接口。只填写密钥的环境变量名，不能粘贴 API 密钥。可把配置交给 Codex，按公司的接口与评测资料填写。</p>
+    <div class="settings-form">
+      <label>工人编号<input id="new-worker-id" placeholder="company-test-helper"></label>
+      <label>角色名称<input id="new-worker-title" placeholder="测试助手"></label>
+      <label>调用方式<select id="new-worker-kind"><option value="chat-completions">公司 API（Kimi / 千问 / 兼容接口）</option><option value="codex">Codex 原生模型</option></select></label>
+      <label>实际模型 ID<input id="new-worker-model" placeholder="填写公司分配的精确型号"></label>
+      <label>接口地址<input id="new-worker-url" placeholder="https://公司接口/v1"></label>
+      <label>密钥环境变量名<input id="new-worker-env" placeholder="COMPANY_MODEL_API_KEY"></label>
+      <label>任务能力<select id="new-worker-capability"><option value="coding">写代码 / 测试</option><option value="reading">读材料</option><option value="writing">写文档</option><option value="review">审查</option></select></label>
+      <label>工作说明<input id="new-worker-instructions" placeholder="例如：只为指定功能编写测试建议"></label>
+    </div><button id="add-worker-profile" class="button secondary">加入配置草稿</button>
+    <details><summary>高级配置：并发上限、更多角色、价格和跑分证据</summary><label for="worker-config">本机分工配置</label><textarea id="worker-config" rows="18" spellcheck="false"></textarea></details>
+    <p class="scope-note">evidence 留空表示没有跑分依据。不能编造分数；要填写精确模型版本、测试名、运行条件、日期和出处。GPT 与第三方共用 max_parallel 名额。</p><div id="worker-error" class="inline-error" hidden></div></div><div class="dialog-footer"><button class="button secondary" data-close>取消</button><button id="save-workers" class="button primary">保存本机配置</button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

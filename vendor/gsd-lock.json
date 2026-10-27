@@ -1,0 +1,9 @@
+{
+  "version": "1.19.0",
+  "archive": "opengsd-gsd-core-1.19.0.tgz",
+  "sha512": "de3d9e8f20e84b8c68d27bfd9d4c252fc361810004572e075ec00677296712ca76b681d3139019b031336531efea6a4732d7cecabfef7fd65b762444c85cef91",
+  "license": "MIT",
+  "source": "https://www.npmjs.com/package/@opengsd/gsd-core/v/1.19.0",
+  "upstream": "https://github.com/open-gsd/gsd-core",
+  "profile": "standard"
+}

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "max_parallel": 2,
+  "providers": {
+    "codex": {"kind":"codex","enabled":true},
+    "kimi": {"kind":"chat-completions","enabled":false,"base_url":"https://api.moonshot.cn/v1","key_env":"COMPANY_KIMI_API_KEY"},
+    "qwen": {"kind":"chat-completions","enabled":false,"base_url":"https://dashscope.aliyuncs.com/compatible-mode/v1","key_env":"COMPANY_QWEN_API_KEY"}
+  },
+  "models": {
+    "gpt-reader":{"provider":"codex","model":"gpt-6-luna","effort":"high","capabilities":["reading"],"max_output_tokens":4096,"parameters":{},"price":null},
+    "gpt-coder":{"provider":"codex","model":"gpt-6.1-sol","effort":"medium","capabilities":["coding","writing","review"],"max_output_tokens":8192,"parameters":{},"price":null},
+    "company-kimi":{"provider":"kimi","model":"","effort":"medium","capabilities":["coding","reading","writing"],"max_output_tokens":4096,"parameters":{},"price":null},
+    "company-qwen":{"provider":"qwen","model":"","effort":"medium","capabilities":["coding","reading","writing"],"max_output_tokens":4096,"parameters":{},"price":null}
+  },
+  "roles": {
+    "reader":{"title":"证据阅读","capability":"reading","instructions":"按指定材料返回有出处的证据和不确定项。"},
+    "writer":{"title":"文档撰写","capability":"writing","instructions":"按范围输出完整正文，保留原材料的证据与限制。"},
+    "coder":{"title":"代码实现","capability":"coding","instructions":"按限定文件与验收要求提出可审查的代码，不扩展需求。"},
+    "reviewer":{"title":"代码审查","capability":"review","instructions":"只核对实际代码与要求，指出有证据的缺陷，不把推断写成已测结果。"}
+  },
+  "evidence": []
+}

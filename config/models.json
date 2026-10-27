@@ -1,0 +1,6 @@
+{
+  "reader": {"model": "gpt-6-luna", "effort": "high"},
+  "writer": {"model": "gpt-6.1-sol", "effort": "medium"},
+  "coder": {"model": "gpt-6.1-sol", "effort": "medium"},
+  "max_parallel": 2
+}

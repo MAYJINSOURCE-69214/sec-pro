@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "items": [
+    {
+      "id": "demo-official-method",
+      "title": "示例更新：先检查输入资料是否完整",
+      "summary": "本地同步演示内容，不是已发布的 GitHub 更新。",
+      "body": "【本地预览样例】处理资料前核对范围、格式和缺失页。此项用于演示新版本内容加入经验库；不代表远程发布已完成。",
+      "kind": "experience",
+      "status": "candidate",
+      "version": "1.0.0",
+      "tags": [
+        "演示",
+        "更新"
+      ],
+      "updated_at": "2026-10-27T00:00:00Z"
+    }
+  ]
+}
