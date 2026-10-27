@@ -15,7 +15,7 @@ function renderIntegrations(){
   $('update-channel').value=u.policy.channel;
   $('update-trusted').checked=u.policy.trusted;
   $('update-auto').checked=u.policy.auto_apply;
-  $('update-message').textContent=u.last_check.message || '尚未检查远程版本。当前包没有发布到 GitHub。';
+  $('update-message').textContent=u.last_check.message || '尚未检查远程版本。请配置维护者仓库后检查更新。';
   $('worker-jobs').textContent=state.workers.jobs.length?JSON.stringify(state.workers.jobs,null,2):'尚无已登记工单。配置存在不代表已调用模型。';
 }
 $('save-workers').addEventListener('click',async()=>{

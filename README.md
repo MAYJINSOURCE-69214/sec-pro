@@ -6,7 +6,7 @@ GSD 安排开发步骤；SEC Pro 提供团队经验；当前主模型（例如 A
 
 ## 员工从这里开始
 
-1. 打开 [Beta 下载页](https://github.com/fangzhengfelix9461/sec-pro/releases/tag/v0.2.0-beta.1)，下载 **SEC-Pro-Beta-0.2.0-beta.1.zip**。这是包含固定 GSD 依赖的安装包；无需另找仓库安装 GSD。
+1. 打开 [Beta 下载页](https://github.com/fangzhengfelix9461/sec-pro/releases/tag/v0.2.0-beta.2)，下载 **SEC-Pro-Beta-0.2.0-beta.2.zip**。这是包含固定 GSD 依赖的安装包；无需另找仓库安装 GSD。
 2. 将 ZIP 完整解压到一个以后不随便移动的目录，例如用户文档目录下的 `SEC-Pro`。不要直接在压缩包中运行脚本。
 3. 在已登录的 Codex 中打开解压目录，把下一节的安装说明粘贴给 Codex。需要 Python 3.11+；完整安装还需要 Node.js 24+。缺少运行时时按下面的依赖安装方式处理。
 4. 安装完成后，在该目录执行 `python launch.py`，或 Windows 双击 `start.cmd`。浏览器打开 `http://127.0.0.1:8765`。结束后可关闭启动窗口停止工作台。
