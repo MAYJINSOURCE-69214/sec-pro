@@ -256,8 +256,12 @@ class Library:
             public = {k: item[k] for k in ('title', 'body', 'summary', 'kind', 'tags', 'version')}
             public.update({'id': f'team-{proposal_id[:12]}-{index:02d}', 'status': 'candidate', 'origin': 'contributor-proposal'})
             public_items.append(public)
-        atomic_json(self.data / 'outbox' / (proposal_id + '.json'), {'schema': 1, 'proposal_id': proposal_id,
-                    'created_at': now(), 'items': public_items, 'status': 'prepared_local'})
+        proposal = {'schema': 1, 'proposal_id': proposal_id, 'created_at': now(),
+                    'items': public_items, 'status': 'prepared_local'}
+        # Keep room for submission checkpoints; load_json must be able to reopen this file.
+        if len(json.dumps(proposal, ensure_ascii=False, indent=2).encode('utf-8')) > MAX_JSON - 4096:
+            raise ValueError('批量提案过大，请减少条目或缩短正文后分批提交。')
+        atomic_json(self.data / 'outbox' / (proposal_id + '.json'), proposal)
         with self.connect() as db:
             self.log(db, 'proposal', f'已生成 {len(public_items)} 条经验的本地批量提案')
         return {'message': f'已生成包含 {len(public_items)} 条内容的本地提案，尚未发送到 GitHub。',
@@ -281,6 +285,10 @@ class Library:
         if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
             raise ValueError('请先配置团队仓库。')
         for path in directory.glob('*.json'):
+            # Older batches could exceed the read limit and never reach github_propose.
+            # Leave those files intact without blocking unrelated valid proposals.
+            if path.stat().st_size > MAX_JSON:
+                continue
             other = load_json(path)
             url = other.get('pr_url', '')
             if other.get('status') == 'submitted' and re.fullmatch(re.escape(prefix) + r'[0-9]+', url):

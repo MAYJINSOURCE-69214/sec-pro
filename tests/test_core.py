@@ -156,6 +156,39 @@ class LibraryTests(unittest.TestCase):
         app.atomic_json(self.path / 'settings.json', {'team_repo':'different/repo','allow_upload':False})
         self.assertIsNone(self.lib.matching_submitted_batch(b))
 
+    def test_oversized_batch_is_rejected_without_poisoning_later_proposals(self):
+        ids = [self.lib.remember({'title': f'方法{i}', 'body': '通用方法。' * 4800})['item']['id']
+               for i in range(15)]
+        preview = self.lib.share_preview_batch(ids)
+        with self.assertRaisesRegex(ValueError, '过大'):
+            self.lib.prepare_share_batch(ids, True, preview['revisions'])
+        self.assertFalse(list((self.path / 'outbox').glob('*.json')))
+        short = self.lib.remember({'title': '短提案', 'body': '保留最小复现并验证修复。'})['item']['id']
+        preview = self.lib.share_preview_batch([short])
+        proposal = self.lib.prepare_share_batch([short], True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'settings.json', {'team_repo': 'owner/repo', 'allow_upload': False})
+        self.assertIsNone(self.lib.matching_submitted_batch(proposal))
+
+    def test_legacy_oversized_proposal_does_not_block_existing_match(self):
+        ident = self.lib.remember({'title': '短提案', 'body': '保留最小复现并验证修复。'})['item']['id']
+        preview = self.lib.share_preview_batch([ident])
+        a = self.lib.prepare_share_batch([ident], True, preview['revisions'])['proposal_id']
+        b = self.lib.prepare_share_batch([ident], True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'outbox' / ('f' * 32 + '.json'),
+                        {'status': 'prepared_local', 'items': [{'body': 'x' * app.MAX_JSON}]})
+        saved_path = self.path / 'outbox' / (a + '.json')
+        saved = app.load_json(saved_path)
+        saved.update(status='submitted', pr_url='https://github.com/owner/repo/pull/1')
+        app.atomic_json(saved_path, saved)
+        app.atomic_json(self.path / 'settings.json', {'team_repo': 'owner/repo', 'allow_upload': False})
+        # Check the whole directory, including the legacy file, before finding a match.
+        original_glob = Path.glob
+        def legacy_first(path, pattern):
+            rows = list(original_glob(path, pattern))
+            return iter(sorted(rows, key=lambda row: row.name != 'f' * 32 + '.json'))
+        with patch.object(Path, 'glob', legacy_first):
+            self.assertEqual(self.lib.matching_submitted_batch(b)['url'], 'https://github.com/owner/repo/pull/1')
+
     def test_web_one_time_confirmation_uses_git_credentials_without_gh(self):
         import base64
         from types import SimpleNamespace
