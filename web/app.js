@@ -14,6 +14,7 @@ let view = 'overview';
 let kind = 'all';
 let currentItem = null;
 let shareCheck = null;
+let shareProposal = null;
 let toastTimer;
 let stateRequest = 0;
 
@@ -250,6 +251,10 @@ async function sync(channel) {
 
 function clearShareReview() {
   shareCheck = null;
+  shareProposal = null;
+  $('share-upload-area').hidden = true;
+  $('share-upload-confirm').checked = false;
+  $('share-upload').disabled = true;
   $('share-preview').hidden = true;
   $('share-error').hidden = true;
   $('share-success').hidden = true;
@@ -257,36 +262,37 @@ function clearShareReview() {
   $('prepare-share').disabled = true;
 }
 
+function selectedShareIds() {
+  return [...$('share-select').querySelectorAll('input:checked')].map(input => input.value);
+}
 function openShare(id) {
   clearShareReview();
   const personal = items().filter(item => item.source === 'personal');
   $('share-select').replaceChildren();
   for (const item of personal) {
-    const option = node('option', '', item.title || '未命名条目');
-    option.value = item.id;
-    $('share-select').append(option);
+    const label = node('label', 'share-option');
+    const check = node('input'); check.type = 'checkbox'; check.value = item.id; check.checked = item.id === id;
+    label.append(check, node('span', '', item.title || '未命名条目'));
+    $('share-select').append(label);
   }
-  if (id && personal.some(item => item.id === id)) $('share-select').value = id;
   $('share-empty').hidden = personal.length > 0;
-  $('share-select').disabled = personal.length === 0;
+  $('share-select-all').disabled = personal.length === 0;
   $('review-share').disabled = personal.length === 0;
   $('share-dialog').showModal();
 }
-
 function renderShareCheck(result) {
   shareCheck = result;
-  $('share-preview-title').textContent = result.title || '';
-  $('share-preview-summary').textContent = result.summary || '';
-  $('share-preview-summary').hidden = !result.summary;
+  $('share-preview-title').textContent = `已选 ${result.items.length} 条，请逐条检查`;
+  $('share-preview-summary').hidden = true;
   $('share-preview-tags').replaceChildren();
-  (Array.isArray(result.tags) ? result.tags : []).forEach(tag => $('share-preview-tags').append(node('span', 'tag', tag)));
-  $('share-preview-body').textContent = result.body || '';
+  $('share-preview-body').textContent = result.items.map((item, index) =>
+    `${index + 1}. ${item.title}\n${item.summary || ''}\n${item.body}\n标签：${(item.tags || []).join('、')}\n`).join('\n');
   $('share-warnings').replaceChildren();
-  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const warnings = result.items.flatMap(item => (item.warnings || []).map(warning => `${item.title}：${warning}`));
   if (warnings.length) {
-    $('share-warnings').append(node('p', '', '检测到需要你处理或复核的内容：'));
-    for (const warning of warnings) $('share-warnings').append(node('p', '', `• ${typeof warning === 'string' ? warning : JSON.stringify(warning)}`));
-  } else $('share-warnings').append(node('p', '', '未检测到明显的敏感信息。这不代表内容没有隐私风险，请继续人工复核。'));
+    $('share-warnings').append(node('p', '', '检测到需要处理的内容：'));
+    for (const warning of warnings) $('share-warnings').append(node('p', '', `• ${warning}`));
+  } else $('share-warnings').append(node('p', '', '未检测到明显敏感信息，仍需人工逐条复核。'));
   if (result.message) $('share-warnings').append(node('p', '', result.message));
   $('share-preview').hidden = false;
   $('share-confirm').checked = false;
@@ -339,14 +345,18 @@ $('create-form').addEventListener('submit', async event => {
 });
 $('open-share').addEventListener('click', () => openShare());
 $('share-select').addEventListener('change', clearShareReview);
+$('share-select-all').addEventListener('click', () => { $('share-select').querySelectorAll('input').forEach(input => { input.checked = true; }); clearShareReview(); });
 $('review-share').addEventListener('click', async () => {
   clearShareReview();
   await busy($('review-share'), '正在检查…', async () => {
-    const id = $('share-select').value;
-    $('share-select').disabled = true;
-    try { renderShareCheck(await api('/api/share/preview', { id })); }
+    const ids = selectedShareIds();
+    if (!ids.length) { showError('share-error', '请至少选择一条经验或技能。'); return; }
+    $('share-select').querySelectorAll('input').forEach(input => { input.disabled = true; });
+    $('share-select-all').disabled = true;
+    try { renderShareCheck(await api('/api/share/preview-batch', { ids })); }
     catch (error) { showError('share-error', error); }
-    finally { $('share-select').disabled = false; }
+    finally { $('share-select').querySelectorAll('input').forEach(input => { input.disabled = false; });
+    $('share-select-all').disabled = false; }
   });
 });
 $('share-confirm').addEventListener('change', () => { $('prepare-share').disabled = !shareCheck?.can_prepare || !$('share-confirm').checked; });
@@ -355,24 +365,48 @@ $('prepare-share').addEventListener('click', async () => {
   $('share-error').hidden = true;
   let prepared = false;
   await busy($('prepare-share'), '正在生成…', async () => {
-    $('share-select').disabled = true;
+    $('share-select').querySelectorAll('input').forEach(input => { input.disabled = true; });
+    $('share-select-all').disabled = true;
     $('review-share').disabled = true;
     $('share-confirm').disabled = true;
     try {
-      const result = await api('/api/share/prepare', { id: shareCheck.id, confirm: true });
+      const result = await api('/api/share/prepare-batch', { ids: selectedShareIds(), revisions: shareCheck.revisions, confirm: true });
       $('share-success').textContent = `${result.message || '已生成本地待上传提案。'}${result.proposal_id ? ` 提案编号：${result.proposal_id}。` : ''} 未发送到 GitHub。`;
       $('share-success').hidden = false;
+      shareProposal = result.proposal_id || null;
+      $('share-upload-target').textContent = '目标 GitHub 仓库：' + (state?.github?.repository || '未配置') + '。公开仓库中的提案可被所有人查看；本次确认不会开启持续上传。';
+      $('share-upload-area').hidden = !shareProposal || state?.preview === true;
       shareCheck = null;
       prepared = true;
       await loadState();
     } catch (error) { showError('share-error', error); }
     finally {
-      $('share-select').disabled = false;
+      $('share-select').querySelectorAll('input').forEach(input => { input.disabled = false; });
+    $('share-select-all').disabled = false;
       $('review-share').disabled = false;
       $('share-confirm').disabled = prepared;
     }
   });
   $('prepare-share').disabled = prepared || !shareCheck?.can_prepare || !$('share-confirm').checked;
+});
+$('share-upload-confirm').addEventListener('change', () => { $('share-upload').disabled = !shareProposal || !$('share-upload-confirm').checked; });
+$('share-upload').addEventListener('click', async () => {
+  if (!shareProposal || !$('share-upload-confirm').checked) return;
+  $('share-error').hidden = true;
+  await busy($('share-upload'), '正在提交…', async () => {
+    try {
+      const result = await api('/api/share/submit', { proposal_id: shareProposal, confirm: true, confirm_public: true });
+      const target = new URL(result.url);
+      if (target.protocol !== 'https:' || target.hostname !== 'github.com') throw new Error('审核请求地址无效，请手动核对。');
+      $('share-success').replaceChildren(document.createTextNode(result.message + ' '));
+      const link = node('a', '', '查看审核请求'); link.href = target.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      $('share-success').append(link);
+      $('share-success').hidden = false;
+      $('share-upload-area').hidden = true;
+      shareProposal = null;
+    } catch (error) { showError('share-error', error); }
+  });
+  $('share-upload').disabled = !shareProposal || !$('share-upload-confirm').checked;
 });
 $('detail-action').addEventListener('click', async () => {
   if (!currentItem) return;

@@ -229,6 +229,73 @@ class Library:
             self.log(db, 'proposal', '已生成待上传提案，尚未发送：' + item['title'])
         return {'message': '待上传提案已保存到本机，尚未发送到 GitHub。', 'proposal_id': proposal_id}
 
+    def share_preview_batch(self, identifiers):
+        if not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 30:
+            raise ValueError('请选择 1 至 30 条个人经验或技能。')
+        if any(not isinstance(i, str) for i in identifiers) or len(set(identifiers)) != len(identifiers):
+            raise ValueError('条目编号无效或重复。')
+        previews = [self.share_preview(i) for i in identifiers]
+        return {'items': previews, 'revisions': {i: digest(self.get(i)) for i in identifiers},
+                'can_prepare': all(p['can_prepare'] for p in previews),
+                'message': '请逐条人工复核全文；自动检查不能保证脱敏完整。'}
+
+    def prepare_share_batch(self, identifiers, confirmed=False, revisions=None):
+        if confirmed is not True:
+            raise ValueError('先逐条预览并明确确认。')
+        preview = self.share_preview_batch(identifiers)
+        if not isinstance(revisions, dict) or revisions != preview['revisions']:
+            raise ValueError('内容自预览后发生变化，请重新检查。')
+        if not preview['can_prepare']:
+            raise ValueError('至少一条内容需要先处理敏感信息。')
+        proposal_id = uuid.uuid4().hex
+        public_items = []
+        for index, ident in enumerate(identifiers, 1):
+            item = self.get(ident)
+            if digest(item) != revisions[ident]:
+                raise ValueError('内容自预览后发生变化，请重新检查。')
+            public = {k: item[k] for k in ('title', 'body', 'summary', 'kind', 'tags', 'version')}
+            public.update({'id': f'team-{proposal_id[:12]}-{index:02d}', 'status': 'candidate', 'origin': 'contributor-proposal'})
+            public_items.append(public)
+        proposal = {'schema': 1, 'proposal_id': proposal_id, 'created_at': now(),
+                    'items': public_items, 'status': 'prepared_local'}
+        # Keep room for submission checkpoints; load_json must be able to reopen this file.
+        if len(json.dumps(proposal, ensure_ascii=False, indent=2).encode('utf-8')) > MAX_JSON - 4096:
+            raise ValueError('批量提案过大，请减少条目或缩短正文后分批提交。')
+        atomic_json(self.data / 'outbox' / (proposal_id + '.json'), proposal)
+        with self.connect() as db:
+            self.log(db, 'proposal', f'已生成 {len(public_items)} 条经验的本地批量提案')
+        return {'message': f'已生成包含 {len(public_items)} 条内容的本地提案，尚未发送到 GitHub。',
+                'proposal_id': proposal_id, 'count': len(public_items)}
+
+    def matching_submitted_batch(self, proposal_id):
+        """Find an identical batch already sent to the currently configured repository."""
+        if not re.fullmatch(r'[a-f0-9]{32}', str(proposal_id)):
+            raise ValueError('提案编号无效。')
+        directory = self.data / 'outbox'
+        proposal = load_json(directory / (proposal_id + '.json'))
+        values = proposal.get('items') or [proposal.get('item')]
+        fields = ('title', 'body', 'summary', 'kind', 'tags', 'version')
+        def fingerprint(rows):
+            if not isinstance(rows, list) or not rows or any(not isinstance(x, dict) for x in rows):
+                raise ValueError('提案内容无效。')
+            return sorted(digest({k: row.get(k) for k in fields}) for row in rows)
+        target = fingerprint(values)
+        repo = self.settings().get('team_repo', '')
+        prefix = f'https://github.com/{repo}/pull/'
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
+            raise ValueError('请先配置团队仓库。')
+        for path in directory.glob('*.json'):
+            # Older batches could exceed the read limit and never reach github_propose.
+            # Leave those files intact without blocking unrelated valid proposals.
+            if path.stat().st_size > MAX_JSON:
+                continue
+            other = load_json(path)
+            url = other.get('pr_url', '')
+            if other.get('status') == 'submitted' and re.fullmatch(re.escape(prefix) + r'[0-9]+', url):
+                if fingerprint(other.get('items') or [other.get('item')]) == target:
+                    return {'url': url, 'message': '相同内容已经提交过，请查看已有审核请求。'}
+        return None
+
     def sync(self, channel):
         if channel not in ('official', 'team'):
             raise ValueError('未知同步频道。')
@@ -330,11 +397,19 @@ def worker_request(lib, role, task):
             'reasoning_effort': effort, 'fork_turns': 'none', 'message': instruction + '\n\n' + task.strip()}
 
 
-def github_propose(lib, proposal_id, confirm_public=False):
-    """Explicit CLI only; not called by the preview UI. Uses existing gh authentication."""
+def find_github_cli():
+    gh = shutil.which('gh')
+    if gh:
+        return gh
+    managed = Path.home() / 'CLI' / 'programs' / 'gh' / 'bin' / 'gh.exe'
+    return str(managed) if managed.is_file() else None
+
+
+def github_propose(lib, proposal_id, confirm_public=False, confirmed_ui=False):
+    """Submit an explicitly reviewed proposal using gh or Git's credential manager."""
     settings = lib.settings()
     repo = settings.get('team_repo', '')
-    if lib.preview or not settings.get('allow_upload') or not confirm_public:
+    if lib.preview or not confirm_public or not (settings.get('allow_upload') or confirmed_ui):
         raise ValueError('上传默认关闭；需配置仓库、允许上传并显式传入 --confirm-public。')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo) or not re.fullmatch(r'[a-f0-9]{32}', proposal_id):
         raise ValueError('仓库或提案编号无效。')
@@ -342,13 +417,56 @@ def github_propose(lib, proposal_id, confirm_public=False):
     proposal = load_json(path)
     if proposal.get('pr_url'):
         return {'url': proposal['pr_url'], 'message': '此提案已提交，不重复创建。'}
-    item = validate_item(proposal['item'], 'team')
-    if privacy_warnings(json.dumps(item, ensure_ascii=False)):
+    batch = 'items' in proposal
+    raw_items = proposal.get('items') if batch else [proposal['item']]
+    if not isinstance(raw_items, list) or not 1 <= len(raw_items) <= 30:
+        raise ValueError('提案条目数量无效。')
+    items = [validate_item(item, 'team') for item in raw_items]
+    if len({item['id'] for item in items}) != len(items):
+        raise ValueError('提案条目编号重复。')
+    if any(privacy_warnings(json.dumps(item, ensure_ascii=False)) for item in items):
         raise ValueError('提案仍含需要处理的敏感信息。')
-    gh = shutil.which('gh')
+    gh = find_github_cli()
+    git_token = None
     if not gh:
-        raise ValueError('请先安装 GitHub CLI 并由本人登录；程序不会代填账号。')
+        git = shutil.which('git')
+        if not git:
+            raise ValueError('请先安装 Git 或 GitHub CLI 并登录。')
+        env = dict(os.environ, GIT_TERMINAL_PROMPT='0')
+        try:
+            auth = subprocess.run([git, 'credential', 'fill'], input='protocol=https\nhost=github.com\n\n',
+                                  capture_output=True, text=True, encoding='utf-8', timeout=120, env=env)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ValueError('GitHub 登录未完成，请在授权窗口登录后重试。') from error
+        creds = dict(line.split('=', 1) for line in auth.stdout.splitlines() if '=' in line)
+        git_token = creds.get('password')
+        if auth.returncode or not git_token:
+            raise ValueError('GitHub 凭据不可用，请先通过 Git Credential Manager 登录。')
     def api(endpoint, method='GET', payload=None, missing_ok=False):
+        if not gh:
+            from urllib.error import HTTPError, URLError
+            from urllib.request import HTTPRedirectHandler, build_opener
+            class NoRedirect(HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    return None
+            encoded = None if payload is None else json.dumps(payload).encode('utf-8')
+            req = Request('https://api.github.com/' + endpoint, data=encoded, method=method,
+                          headers={'Authorization': 'Bearer ' + git_token, 'Accept': 'application/vnd.github+json',
+                                   'Content-Type': 'application/json', 'User-Agent': 'SEC-Pro'})
+            try:
+                with build_opener(NoRedirect()).open(req, timeout=30) as response:
+                    if urlparse(response.geturl()).hostname != 'api.github.com':
+                        raise ValueError('GitHub 请求发生跨站跳转，已停止。')
+                    content = response.read(MAX_JSON + 1)
+                    if len(content) > MAX_JSON:
+                        raise ValueError('GitHub 响应过大。')
+                    return json.loads(content or b'{}')
+            except HTTPError as error:
+                if missing_ok and error.code == 404:
+                    return None
+                raise ValueError(f'GitHub 操作未完成（HTTP {error.code}）；请检查登录和权限，重试前核对远端。') from error
+            except (URLError, OSError, TimeoutError) as error:
+                raise ValueError('GitHub 响应未确认；远端可能已有提案，请核对后重试。') from error
         args = [gh, 'api', endpoint, '--method', method]
         if payload is not None:
             args += ['--input', '-']
@@ -373,7 +491,7 @@ def github_propose(lib, proposal_id, confirm_public=False):
         atomic_json(path, proposal)
     branch = 'sec-pro/experience-' + proposal_id[:12]
     from urllib.parse import quote
-    content = json.dumps({'schema': 1, 'item': proposal['item']}, ensure_ascii=False, indent=2).encode()
+    content = json.dumps({'schema': 1, **({'items': raw_items} if batch else {'item': raw_items[0]})}, ensure_ascii=False, indent=2).encode()
     file_endpoint = f'repos/{fork}/contents/contributions/{proposal_id}.json'
     if not proposal.get('branch_created'):
         # Save the intended base before the remote write: its response may be lost.
@@ -412,7 +530,7 @@ def github_propose(lib, proposal_id, confirm_public=False):
     # Recover a previously created PR after an uncertain response.
     existing = api(f'repos/{repo}/pulls?head={quote(head, safe="")}&state=open')
     pr = existing[0] if existing else api(f'repos/{repo}/pulls', 'POST',
-        {'title': '经验提案：' + item['title'], 'head': head, 'base': base,
+        {'title': ('批量经验提案：' + str(len(items)) + ' 条') if batch else '经验提案：' + items[0]['title'], 'head': head, 'base': base,
          'body': '此提案只包含贡献者明确选取的经验。请维护者核对适用条件、隐私与证据，再加入 library/team.json；未合并前不会自动成为团队规则。'})
     proposal.update({'pr_url': pr['html_url'], 'status': 'submitted'})
     atomic_json(path, proposal)
@@ -478,6 +596,19 @@ def serve(lib, port):
                     result = lib.share_preview(value.get('id', ''))
                 elif self.path == '/api/share/prepare':
                     result = lib.prepare_share(value.get('id', ''), value.get('confirm'))
+                elif self.path == '/api/share/preview-batch':
+                    result = lib.share_preview_batch(value.get('ids'))
+                elif self.path == '/api/share/prepare-batch':
+                    result = lib.prepare_share_batch(value.get('ids'), value.get('confirm'), value.get('revisions'))
+                elif self.path == '/api/share/submit':
+                    if value.get('confirm') is not True or value.get('confirm_public') is not True:
+                        raise ValueError('提交前请确认目标仓库及公开分享内容。')
+                    if lib.preview:
+                        raise ValueError('演示模式不会上传。')
+                    ident = value.get('proposal_id', '')
+                    result = lib.matching_submitted_batch(ident)
+                    if result is None:
+                        result = github_propose(lib, ident, confirm_public=True, confirmed_ui=True)
                 elif self.path == '/api/activate':
                     result = lib.activate_skill(value.get('id', ''), value.get('confirm'))
                 elif self.path == '/api/workers/config':

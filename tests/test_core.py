@@ -83,6 +83,153 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(proposal['status'], 'prepared_local')
         self.assertNotIn('personal-', json.dumps(proposal))
 
+    def test_batch_prepares_one_proposal_after_preview_and_confirmation(self):
+        ids = [self.lib.remember({'title': title, 'body': '可复用的验证方法。'})['item']['id'] for title in ('甲', '乙', '丙')]
+        preview = self.lib.share_preview_batch(ids)
+        self.assertTrue(preview['can_prepare'])
+        with self.assertRaises(ValueError):
+            self.lib.prepare_share_batch(ids, False, preview['revisions'])
+        with patch.object(app.subprocess, 'run', side_effect=AssertionError('network forbidden')):
+            result = self.lib.prepare_share_batch(ids, True, preview['revisions'])
+        proposal = json.loads((self.path / 'outbox' / (result['proposal_id'] + '.json')).read_text(encoding='utf-8'))
+        self.assertEqual(result['count'], 3)
+        self.assertEqual(len(proposal['items']), 3)
+        self.assertEqual(len({item['id'] for item in proposal['items']}), 3)
+        self.assertEqual(proposal['status'], 'prepared_local')
+        self.assertNotIn('personal-', json.dumps(proposal))
+
+    def test_batch_fails_closed_on_sensitive_duplicate_and_changed_content(self):
+        good = self.lib.remember({'title':'可分享', 'body':'安全方法。'})['item']['id']
+        sensitive = self.lib.remember({'title':'待检查', 'body':'联系 private@example.org'})['item']['id']
+        preview = self.lib.share_preview_batch([good, sensitive])
+        self.assertFalse(preview['can_prepare'])
+        with self.assertRaises(ValueError): self.lib.prepare_share_batch([good, sensitive], True, preview['revisions'])
+        with self.assertRaises(ValueError): self.lib.share_preview_batch([good, good])
+        preview = self.lib.share_preview_batch([good])
+        with self.assertRaises(ValueError): self.lib.prepare_share_batch([good], True, {good:'stale'})
+        self.assertFalse((self.path / 'outbox').exists())
+
+    def test_batch_submit_creates_one_contribution_file_and_one_pr(self):
+        import base64
+        from types import SimpleNamespace
+        ids = [self.lib.remember({'title': title, 'body': '可分享的方法。'})['item']['id'] for title in ('甲', '乙', '丙')]
+        preview = self.lib.share_preview_batch(ids)
+        proposal = self.lib.prepare_share_batch(ids, True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'settings.json', {'team_repo':'owner/repo','allow_upload':True})
+        self.lib.preview = False
+        requests = []
+        def fake_run(args, input=None, **kwargs):
+            endpoint, method = args[2], args[4]
+            payload = json.loads(input) if input else None
+            requests.append((endpoint, method, payload))
+            if endpoint == 'user': value = {'login':'author'}
+            elif endpoint == 'repos/owner/repo': value = {'default_branch':'main','permissions':{'push':True}}
+            elif '/git/ref/heads/sec-pro/' in endpoint or '/contents/' in endpoint and method == 'GET':
+                return SimpleNamespace(returncode=1, stderr='HTTP 404', stdout='')
+            elif endpoint.endswith('/git/ref/heads/main'): value = {'object':{'sha':'a'*40}}
+            elif endpoint.startswith('repos/owner/repo/pulls?'): value = []
+            elif endpoint == 'repos/owner/repo/pulls': value = {'html_url':'https://github.com/owner/repo/pull/1'}
+            else: value = {}
+            return SimpleNamespace(returncode=0, stderr='', stdout=json.dumps(value))
+        with patch.object(app.shutil, 'which', return_value='gh'), patch.object(app.subprocess, 'run', side_effect=fake_run):
+            result = app.github_propose(self.lib, proposal, True)
+            self.assertEqual(app.github_propose(self.lib, proposal, True)['url'], result['url'])
+        files = [p for e,m,p in requests if '/contents/' in e and m == 'PUT']
+        self.assertEqual(len(files), 1)
+        uploaded = json.loads(base64.b64decode(files[0]['content']))
+        self.assertEqual(len(uploaded['items']), 3)
+        self.assertEqual(sum(e == 'repos/owner/repo/pulls' and m == 'POST' for e,m,p in requests), 1)
+
+    def test_identical_batch_different_order_finds_existing_pr(self):
+        ids = [self.lib.remember({'title': name, 'body':'可分享的方法。'})['item']['id'] for name in ('甲','乙','丙')]
+        first = self.lib.share_preview_batch(ids)
+        a = self.lib.prepare_share_batch(ids, True, first['revisions'])['proposal_id']
+        reverse = list(reversed(ids))
+        second = self.lib.share_preview_batch(reverse)
+        b = self.lib.prepare_share_batch(reverse, True, second['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'settings.json', {'team_repo':'owner/repo','allow_upload':False})
+        path = self.path / 'outbox' / (a + '.json')
+        saved = json.loads(path.read_text(encoding='utf-8'))
+        saved.update(status='submitted', pr_url='https://github.com/owner/repo/pull/1')
+        app.atomic_json(path, saved)
+        self.assertEqual(self.lib.matching_submitted_batch(b)['url'], 'https://github.com/owner/repo/pull/1')
+        app.atomic_json(self.path / 'settings.json', {'team_repo':'different/repo','allow_upload':False})
+        self.assertIsNone(self.lib.matching_submitted_batch(b))
+
+    def test_oversized_batch_is_rejected_without_poisoning_later_proposals(self):
+        ids = [self.lib.remember({'title': f'方法{i}', 'body': '通用方法。' * 4800})['item']['id']
+               for i in range(15)]
+        preview = self.lib.share_preview_batch(ids)
+        with self.assertRaisesRegex(ValueError, '过大'):
+            self.lib.prepare_share_batch(ids, True, preview['revisions'])
+        self.assertFalse(list((self.path / 'outbox').glob('*.json')))
+        short = self.lib.remember({'title': '短提案', 'body': '保留最小复现并验证修复。'})['item']['id']
+        preview = self.lib.share_preview_batch([short])
+        proposal = self.lib.prepare_share_batch([short], True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'settings.json', {'team_repo': 'owner/repo', 'allow_upload': False})
+        self.assertIsNone(self.lib.matching_submitted_batch(proposal))
+
+    def test_legacy_oversized_proposal_does_not_block_existing_match(self):
+        ident = self.lib.remember({'title': '短提案', 'body': '保留最小复现并验证修复。'})['item']['id']
+        preview = self.lib.share_preview_batch([ident])
+        a = self.lib.prepare_share_batch([ident], True, preview['revisions'])['proposal_id']
+        b = self.lib.prepare_share_batch([ident], True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'outbox' / ('f' * 32 + '.json'),
+                        {'status': 'prepared_local', 'items': [{'body': 'x' * app.MAX_JSON}]})
+        saved_path = self.path / 'outbox' / (a + '.json')
+        saved = app.load_json(saved_path)
+        saved.update(status='submitted', pr_url='https://github.com/owner/repo/pull/1')
+        app.atomic_json(saved_path, saved)
+        app.atomic_json(self.path / 'settings.json', {'team_repo': 'owner/repo', 'allow_upload': False})
+        # Check the whole directory, including the legacy file, before finding a match.
+        original_glob = Path.glob
+        def legacy_first(path, pattern):
+            rows = list(original_glob(path, pattern))
+            return iter(sorted(rows, key=lambda row: row.name != 'f' * 32 + '.json'))
+        with patch.object(Path, 'glob', legacy_first):
+            self.assertEqual(self.lib.matching_submitted_batch(b)['url'], 'https://github.com/owner/repo/pull/1')
+
+    def test_web_one_time_confirmation_uses_git_credentials_without_gh(self):
+        import base64
+        from types import SimpleNamespace
+        from urllib.error import HTTPError
+        ids = [self.lib.remember({'title':n,'body':'可公开的验证方法'})['item']['id'] for n in ('甲','乙')]
+        preview = self.lib.share_preview_batch(ids)
+        ident = self.lib.prepare_share_batch(ids, True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'settings.json', {'team_repo':'owner/repo','allow_upload':False})
+        self.lib.preview = False
+        calls = []
+        class Response:
+            def __init__(self, value): self.value = value
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def geturl(self): return 'https://api.github.com/test'
+            def read(self, size): return json.dumps(self.value).encode()
+        class Opener:
+            def open(self, req, timeout):
+                endpoint = req.full_url.split('api.github.com/', 1)[1]
+                method = req.get_method()
+                payload = json.loads(req.data) if req.data else None
+                calls.append((endpoint, method, payload))
+                if endpoint == 'user': return Response({'login':'author'})
+                if endpoint == 'repos/owner/repo': return Response({'default_branch':'main','permissions':{'push':True}})
+                if '/git/ref/heads/sec-pro/' in endpoint or '/contents/' in endpoint and method == 'GET':
+                    raise HTTPError(req.full_url,404,'not found',{},None)
+                if endpoint.endswith('/git/ref/heads/main'): return Response({'object':{'sha':'a'*40}})
+                if endpoint.startswith('repos/owner/repo/pulls?'): return Response([])
+                if endpoint == 'repos/owner/repo/pulls': return Response({'html_url':'https://github.com/owner/repo/pull/2'})
+                return Response({})
+        with patch.object(app, 'find_github_cli', return_value=None), \
+             patch.object(app.shutil, 'which', return_value='git'), \
+             patch.object(app.subprocess, 'run', return_value=SimpleNamespace(returncode=0,stdout='password=mock-token\n',stderr='')), \
+             patch('urllib.request.build_opener', return_value=Opener()):
+            with self.assertRaises(ValueError): app.github_propose(self.lib, ident, True)
+            result = app.github_propose(self.lib, ident, True, confirmed_ui=True)
+        self.assertEqual(result['url'], 'https://github.com/owner/repo/pull/2')
+        payload = next(payload for endpoint,method,payload in calls if '/contents/' in endpoint and method == 'PUT')
+        self.assertEqual(len(json.loads(base64.b64decode(payload['content']))['items']), 2)
+        self.assertFalse(self.lib.settings()['allow_upload'], 'one-time confirmation must not enable persistent uploads')
+
     def test_skill_activation_stays_inside_preview(self):
         skill = next(i for i in self.lib.items() if i['kind'] == 'skill')
         with self.assertRaises(ValueError):
