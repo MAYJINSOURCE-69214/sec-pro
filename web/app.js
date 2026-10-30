@@ -14,6 +14,7 @@ let view = 'overview';
 let kind = 'all';
 let currentItem = null;
 let shareCheck = null;
+let shareProposal = null;
 let toastTimer;
 let stateRequest = 0;
 
@@ -250,6 +251,10 @@ async function sync(channel) {
 
 function clearShareReview() {
   shareCheck = null;
+  shareProposal = null;
+  $('share-upload-area').hidden = true;
+  $('share-upload-confirm').checked = false;
+  $('share-upload').disabled = true;
   $('share-preview').hidden = true;
   $('share-error').hidden = true;
   $('share-success').hidden = true;
@@ -368,6 +373,9 @@ $('prepare-share').addEventListener('click', async () => {
       const result = await api('/api/share/prepare-batch', { ids: selectedShareIds(), revisions: shareCheck.revisions, confirm: true });
       $('share-success').textContent = `${result.message || '已生成本地待上传提案。'}${result.proposal_id ? ` 提案编号：${result.proposal_id}。` : ''} 未发送到 GitHub。`;
       $('share-success').hidden = false;
+      shareProposal = result.proposal_id || null;
+      $('share-upload-target').textContent = '目标 GitHub 仓库：' + (state?.github?.repository || '未配置') + '。公开仓库中的提案可被所有人查看；本次确认不会开启持续上传。';
+      $('share-upload-area').hidden = !shareProposal || state?.preview === true;
       shareCheck = null;
       prepared = true;
       await loadState();
@@ -380,6 +388,25 @@ $('prepare-share').addEventListener('click', async () => {
     }
   });
   $('prepare-share').disabled = prepared || !shareCheck?.can_prepare || !$('share-confirm').checked;
+});
+$('share-upload-confirm').addEventListener('change', () => { $('share-upload').disabled = !shareProposal || !$('share-upload-confirm').checked; });
+$('share-upload').addEventListener('click', async () => {
+  if (!shareProposal || !$('share-upload-confirm').checked) return;
+  $('share-error').hidden = true;
+  await busy($('share-upload'), '正在提交…', async () => {
+    try {
+      const result = await api('/api/share/submit', { proposal_id: shareProposal, confirm: true, confirm_public: true });
+      const target = new URL(result.url);
+      if (target.protocol !== 'https:' || target.hostname !== 'github.com') throw new Error('审核请求地址无效，请手动核对。');
+      $('share-success').replaceChildren(document.createTextNode(result.message + ' '));
+      const link = node('a', '', '查看审核请求'); link.href = target.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      $('share-success').append(link);
+      $('share-success').hidden = false;
+      $('share-upload-area').hidden = true;
+      shareProposal = null;
+    } catch (error) { showError('share-error', error); }
+  });
+  $('share-upload').disabled = !shareProposal || !$('share-upload-confirm').checked;
 });
 $('detail-action').addEventListener('click', async () => {
   if (!currentItem) return;
