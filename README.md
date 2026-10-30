@@ -132,7 +132,7 @@ GSD继续管理计划与进度，不另造一套开发调度。通过此入口�
 
 「同步下载经验」读取维护者的`library/catalog.json`；「同步团队经验」读取`library/team.json`。在数据目录settings.json配置official_repo/team_repo，格式owner/repo。预览模式只读本地演示目录。
 
-「上传自己的经验」先展示选中内容、检查明显敏感信息，生成本地提案。真实上传独立使用 `github-propose 提案编号 --confirm-public`，还需settings.json中allow_upload:true、GitHub CLI及本人登录。它提交审核请求，维护者核对后把条目加入team.json并设active；只合并贡献文件不会自动推广。当前未做真实远程验收，只支持公开仓库读取。
+「上传自己的经验」支持选择1至30条个人经验或技能，一次查看每条全文与检查结果；本人复核确认后生成一个本地批量提案。内容在预览后变化时必须重新检查；单条旧提案仍可使用。页面不会直接上传。真实上传仍通过 `github-propose 提案编号 --confirm-public`，需settings.json中allow_upload:true、GitHub CLI及本人登录；批量提案只提交一个贡献文件和一个审核请求。维护者需核对后把条目加入team.json并设active；只合并贡献文件不会自动推广。当前只支持公开仓库读取，真实远程验收依GitHub登录和权限另核。
 
 技能目前只支持单文件Markdown指令，阅读后确认启用。带脚本和依赖的多文件技能包不在当前范围。程序更新和经验目录同步是两个入口，不能用“同步经验”冒充程序已升级。
 

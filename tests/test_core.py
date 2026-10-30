@@ -83,6 +83,63 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(proposal['status'], 'prepared_local')
         self.assertNotIn('personal-', json.dumps(proposal))
 
+    def test_batch_prepares_one_proposal_after_preview_and_confirmation(self):
+        ids = [self.lib.remember({'title': title, 'body': '可复用的验证方法。'})['item']['id'] for title in ('甲', '乙', '丙')]
+        preview = self.lib.share_preview_batch(ids)
+        self.assertTrue(preview['can_prepare'])
+        with self.assertRaises(ValueError):
+            self.lib.prepare_share_batch(ids, False, preview['revisions'])
+        with patch.object(app.subprocess, 'run', side_effect=AssertionError('network forbidden')):
+            result = self.lib.prepare_share_batch(ids, True, preview['revisions'])
+        proposal = json.loads((self.path / 'outbox' / (result['proposal_id'] + '.json')).read_text(encoding='utf-8'))
+        self.assertEqual(result['count'], 3)
+        self.assertEqual(len(proposal['items']), 3)
+        self.assertEqual(len({item['id'] for item in proposal['items']}), 3)
+        self.assertEqual(proposal['status'], 'prepared_local')
+        self.assertNotIn('personal-', json.dumps(proposal))
+
+    def test_batch_fails_closed_on_sensitive_duplicate_and_changed_content(self):
+        good = self.lib.remember({'title':'可分享', 'body':'安全方法。'})['item']['id']
+        sensitive = self.lib.remember({'title':'待检查', 'body':'联系 private@example.org'})['item']['id']
+        preview = self.lib.share_preview_batch([good, sensitive])
+        self.assertFalse(preview['can_prepare'])
+        with self.assertRaises(ValueError): self.lib.prepare_share_batch([good, sensitive], True, preview['revisions'])
+        with self.assertRaises(ValueError): self.lib.share_preview_batch([good, good])
+        preview = self.lib.share_preview_batch([good])
+        with self.assertRaises(ValueError): self.lib.prepare_share_batch([good], True, {good:'stale'})
+        self.assertFalse((self.path / 'outbox').exists())
+
+    def test_batch_submit_creates_one_contribution_file_and_one_pr(self):
+        import base64
+        from types import SimpleNamespace
+        ids = [self.lib.remember({'title': title, 'body': '可分享的方法。'})['item']['id'] for title in ('甲', '乙', '丙')]
+        preview = self.lib.share_preview_batch(ids)
+        proposal = self.lib.prepare_share_batch(ids, True, preview['revisions'])['proposal_id']
+        app.atomic_json(self.path / 'settings.json', {'team_repo':'owner/repo','allow_upload':True})
+        self.lib.preview = False
+        requests = []
+        def fake_run(args, input=None, **kwargs):
+            endpoint, method = args[2], args[4]
+            payload = json.loads(input) if input else None
+            requests.append((endpoint, method, payload))
+            if endpoint == 'user': value = {'login':'author'}
+            elif endpoint == 'repos/owner/repo': value = {'default_branch':'main','permissions':{'push':True}}
+            elif '/git/ref/heads/sec-pro/' in endpoint or '/contents/' in endpoint and method == 'GET':
+                return SimpleNamespace(returncode=1, stderr='HTTP 404', stdout='')
+            elif endpoint.endswith('/git/ref/heads/main'): value = {'object':{'sha':'a'*40}}
+            elif endpoint.startswith('repos/owner/repo/pulls?'): value = []
+            elif endpoint == 'repos/owner/repo/pulls': value = {'html_url':'https://github.com/owner/repo/pull/1'}
+            else: value = {}
+            return SimpleNamespace(returncode=0, stderr='', stdout=json.dumps(value))
+        with patch.object(app.shutil, 'which', return_value='gh'), patch.object(app.subprocess, 'run', side_effect=fake_run):
+            result = app.github_propose(self.lib, proposal, True)
+            self.assertEqual(app.github_propose(self.lib, proposal, True)['url'], result['url'])
+        files = [p for e,m,p in requests if '/contents/' in e and m == 'PUT']
+        self.assertEqual(len(files), 1)
+        uploaded = json.loads(base64.b64decode(files[0]['content']))
+        self.assertEqual(len(uploaded['items']), 3)
+        self.assertEqual(sum(e == 'repos/owner/repo/pulls' and m == 'POST' for e,m,p in requests), 1)
+
     def test_skill_activation_stays_inside_preview(self):
         skill = next(i for i in self.lib.items() if i['kind'] == 'skill')
         with self.assertRaises(ValueError):

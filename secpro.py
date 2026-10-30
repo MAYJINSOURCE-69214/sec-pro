@@ -229,6 +229,40 @@ class Library:
             self.log(db, 'proposal', '已生成待上传提案，尚未发送：' + item['title'])
         return {'message': '待上传提案已保存到本机，尚未发送到 GitHub。', 'proposal_id': proposal_id}
 
+    def share_preview_batch(self, identifiers):
+        if not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 30:
+            raise ValueError('请选择 1 至 30 条个人经验或技能。')
+        if any(not isinstance(i, str) for i in identifiers) or len(set(identifiers)) != len(identifiers):
+            raise ValueError('条目编号无效或重复。')
+        previews = [self.share_preview(i) for i in identifiers]
+        return {'items': previews, 'revisions': {i: digest(self.get(i)) for i in identifiers},
+                'can_prepare': all(p['can_prepare'] for p in previews),
+                'message': '请逐条人工复核全文；自动检查不能保证脱敏完整。'}
+
+    def prepare_share_batch(self, identifiers, confirmed=False, revisions=None):
+        if confirmed is not True:
+            raise ValueError('先逐条预览并明确确认。')
+        preview = self.share_preview_batch(identifiers)
+        if not isinstance(revisions, dict) or revisions != preview['revisions']:
+            raise ValueError('内容自预览后发生变化，请重新检查。')
+        if not preview['can_prepare']:
+            raise ValueError('至少一条内容需要先处理敏感信息。')
+        proposal_id = uuid.uuid4().hex
+        public_items = []
+        for index, ident in enumerate(identifiers, 1):
+            item = self.get(ident)
+            if digest(item) != revisions[ident]:
+                raise ValueError('内容自预览后发生变化，请重新检查。')
+            public = {k: item[k] for k in ('title', 'body', 'summary', 'kind', 'tags', 'version')}
+            public.update({'id': f'team-{proposal_id[:12]}-{index:02d}', 'status': 'candidate', 'origin': 'contributor-proposal'})
+            public_items.append(public)
+        atomic_json(self.data / 'outbox' / (proposal_id + '.json'), {'schema': 1, 'proposal_id': proposal_id,
+                    'created_at': now(), 'items': public_items, 'status': 'prepared_local'})
+        with self.connect() as db:
+            self.log(db, 'proposal', f'已生成 {len(public_items)} 条经验的本地批量提案')
+        return {'message': f'已生成包含 {len(public_items)} 条内容的本地提案，尚未发送到 GitHub。',
+                'proposal_id': proposal_id, 'count': len(public_items)}
+
     def sync(self, channel):
         if channel not in ('official', 'team'):
             raise ValueError('未知同步频道。')
@@ -342,8 +376,14 @@ def github_propose(lib, proposal_id, confirm_public=False):
     proposal = load_json(path)
     if proposal.get('pr_url'):
         return {'url': proposal['pr_url'], 'message': '此提案已提交，不重复创建。'}
-    item = validate_item(proposal['item'], 'team')
-    if privacy_warnings(json.dumps(item, ensure_ascii=False)):
+    batch = 'items' in proposal
+    raw_items = proposal.get('items') if batch else [proposal['item']]
+    if not isinstance(raw_items, list) or not 1 <= len(raw_items) <= 30:
+        raise ValueError('提案条目数量无效。')
+    items = [validate_item(item, 'team') for item in raw_items]
+    if len({item['id'] for item in items}) != len(items):
+        raise ValueError('提案条目编号重复。')
+    if any(privacy_warnings(json.dumps(item, ensure_ascii=False)) for item in items):
         raise ValueError('提案仍含需要处理的敏感信息。')
     gh = shutil.which('gh')
     if not gh:
@@ -373,7 +413,7 @@ def github_propose(lib, proposal_id, confirm_public=False):
         atomic_json(path, proposal)
     branch = 'sec-pro/experience-' + proposal_id[:12]
     from urllib.parse import quote
-    content = json.dumps({'schema': 1, 'item': proposal['item']}, ensure_ascii=False, indent=2).encode()
+    content = json.dumps({'schema': 1, **({'items': raw_items} if batch else {'item': raw_items[0]})}, ensure_ascii=False, indent=2).encode()
     file_endpoint = f'repos/{fork}/contents/contributions/{proposal_id}.json'
     if not proposal.get('branch_created'):
         # Save the intended base before the remote write: its response may be lost.
@@ -412,7 +452,7 @@ def github_propose(lib, proposal_id, confirm_public=False):
     # Recover a previously created PR after an uncertain response.
     existing = api(f'repos/{repo}/pulls?head={quote(head, safe="")}&state=open')
     pr = existing[0] if existing else api(f'repos/{repo}/pulls', 'POST',
-        {'title': '经验提案：' + item['title'], 'head': head, 'base': base,
+        {'title': ('批量经验提案：' + str(len(items)) + ' 条') if batch else '经验提案：' + items[0]['title'], 'head': head, 'base': base,
          'body': '此提案只包含贡献者明确选取的经验。请维护者核对适用条件、隐私与证据，再加入 library/team.json；未合并前不会自动成为团队规则。'})
     proposal.update({'pr_url': pr['html_url'], 'status': 'submitted'})
     atomic_json(path, proposal)
@@ -478,6 +518,10 @@ def serve(lib, port):
                     result = lib.share_preview(value.get('id', ''))
                 elif self.path == '/api/share/prepare':
                     result = lib.prepare_share(value.get('id', ''), value.get('confirm'))
+                elif self.path == '/api/share/preview-batch':
+                    result = lib.share_preview_batch(value.get('ids'))
+                elif self.path == '/api/share/prepare-batch':
+                    result = lib.prepare_share_batch(value.get('ids'), value.get('confirm'), value.get('revisions'))
                 elif self.path == '/api/activate':
                     result = lib.activate_skill(value.get('id', ''), value.get('confirm'))
                 elif self.path == '/api/workers/config':
